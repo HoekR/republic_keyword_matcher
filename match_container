@@ -1,0 +1,193 @@
+# classes for containers ahead. They will accommodate all sorts of fragments, consisting of a type and a span
+# N.B. for debugging purposes they now have fragment ids (to check that fragments are not duplicately displayed)
+
+import itertools
+from itertools import tee
+import json
+
+#########################
+# helpers           #
+##########################
+# this is straight from the python docs
+
+
+
+def pairwise(iterable):
+    a, b = tee(iterable)
+    next(b, None)
+    return zip(a, b)
+
+
+def check_overlap(a,b, minlen=1):
+    overlap = set(pair[0]) & set(pair[1])
+    if len(overlap) > minlen:
+        result = True
+    else:
+        result = False
+    return result
+
+
+def display_in_html(seq):
+    """serialize snippets of html"""
+    out = ["<div>%s</div><hr>" % x.serialize() for x in seq]
+    return "\n\n".join(out)
+
+
+####################
+# object for text #
+####################
+
+# we want this in an object so that we can store some metadata on it and retrieve them any time
+
+class TextWithMetadata(object):
+    def __init__(self, searchobject):
+        metadata = searchobject['_source']['metadata']
+        self.text = searchobject['_source'].get('text') or "niks"
+        self.meeting_date = metadata.get('meeting_date') or ''
+        self.keyword_matches = [k['match_keyword'] for k in metadata.get('keyword_matches')]
+        self.para_id = searchobject['_id']  # so that we can later get it back
+
+    def get_meeting_date(self):
+        return self.meeting_date
+
+    def set_txt(self, txt):
+        self.txt = txt
+
+    def get_txt(self):
+        return self.txt
+
+    def __repr__(self):
+        return self.text
+
+####################
+# object for text #
+####################
+
+#TODO: decide if we want to add mapping to category keyword
+
+
+class TypedFragment(object):
+    def __init__(self, fragment=(), t="", pattern="", idnr=0):
+        self.type = t
+        self.begin = fragment[0]
+        self.end = fragment[1]
+        self.idnr = idnr
+        self.pattern = ""
+
+    def __repr__(self):
+        return "fragment type {}: {}-{}".format(self.type, self.begin, self.end)
+
+    def __lt__(self, other):
+        return self.begin < other
+
+    def __le__(self, other):
+        return self.begin <= other
+
+    def __ge__(self, other):
+        return self.begin >= other
+
+    def __gt__(self, other):
+        return self.begin > other
+
+    def to_json(self):
+        return json.dumps({'fragment': (self.begin, self.end),
+                           'class': self.type,
+                           'pattern': self.pattern})
+
+    def set_pattern(self, pattern):
+        self.pattern = pattern
+
+
+################################
+# object with text and matches #
+################################
+
+# TODO: abstract out template
+
+
+
+
+class MatchedText(object):
+    nw_id = itertools.count()
+
+    def __init__(self, item=''):
+        self.item = item
+        self.spans = []
+        self.colormap = {}
+        self.template = "<div>{}</div><hr>"
+        self.mtmpl = """<span style="color:{color}">{txt}</span>"""
+        self.para_id = ""
+
+    def color_match(self, fragment, color):
+        """return marked fragment from item on basis of span"""
+        output = provtmp.format(txt=fragment, color=color)
+        return output
+
+    def mapcolors(self, colors={}):
+        self.colormap = colors
+
+    def serialize(self):
+        """serialize spans into marked item"""
+        fragments = self.get_fragments()
+        # fragment += "[{}]".format(i.idnr) # for now
+        outfragments = []
+        for fragment in fragments:
+            if fragment[0] != 'unmarked':
+                tcolor = self.colormap.get(fragment[0]) or 'unknown'
+                ff = self.color_match(fragment[1], color=tcolor)
+                outfragments.append(ff)
+            else:
+                outfragments.append(fragment[1])
+        txt = " ".join(outfragments)  # may want to turn this in object property
+        return txt
+
+    def set_span(self, span=(), clas="", pattern=""):
+        this_id = next(self.nw_id)
+        sp = TypedFragment(fragment=span, t=clas, pattern=pattern, idnr=this_id)
+        self.spans.append(sp)
+        return this_id
+
+    def get_span(self, idnr=None):
+        res = [i for i in self.spans if i.idnr == idnr]
+        if len(res) > 0:
+            return res[0]
+        else:
+            raise Exception('Error', 'no such fragment')
+
+    def get_fragments(self):
+        """the text in the form of a list of fragments"""
+        end = 0
+        fragments = []
+        self.spans.sort()
+        txt = self.item
+        if self.spans != []:
+            for i in self.spans:
+                begin = i.begin
+                if end < i.begin - 1:  # we need the intermediate text as well
+                    fragments.append(('unmarked', txt[end:begin]))
+                end = i.end
+                fragment = (i.type, txt[begin:end])
+                fragments.append((fragment))
+                end = i.end
+        if end < len(txt):
+            fragments.append(('unmarked', txt[end:]))
+
+        return fragments
+
+    def get_unmatched_text(self):
+        """text represented as unmatched items"""
+        fr = self.get_fragments()
+        fragments = [fragment[1] for fragment in fr if fragment[0] == 'unmarked']
+        return fragments
+
+    def to_json(self):
+        """make json representation"""
+        [{"fragment": (s.begin, s.end), "class": s.type, "pattern": s.pattern} for s in self.spans]
+        return json.dumps()
+
+    def from_json(self, json):
+        """construct spans from jsoninput.
+        Json could have an item and fragments with type
+        TODO: construct colormap from classes"""
+        for item in json:
+            self.set_span(item.get('fragment'), item.get("class"), item.get('pattern'))
