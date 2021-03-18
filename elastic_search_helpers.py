@@ -1,12 +1,68 @@
-i
-import republic.parser.republic_file_parser as file_parser
-from republic.config.republic_config import base_config, set_config_year
+from republic.config.republic_config import base_config
 
 
 from elasticsearch import Elasticsearch
-import republic.elastic.republic_elasticsearch as rep_es
+from republic.elastic import republic_elasticsearch
+from .elastic_search import es_republic
+from .models.models import TextWithMetadata, MatchedText
 
-es = Elasticsearch()
+
+def make_presentielijsten(year='0'):
+    rep_es = republic_elasticsearch.initialize_es(host_type="external", timeout=60)
+    return get_presentielijsten(year=year, index='pagexml_meeting', es=rep_es)
+
+def get_presentielijsten(year: int = '0', index: str = 'pagexml_meeting', es: object = None):
+    prs_body = {
+      "query": {
+        "term":
+          {"metadata.meeting_year": year}
+      },
+      "size": 5000,
+      "sort": ["_id"],
+
+    }
+
+    presentielijsten = {}
+    results = es.search(index=index, body=prs_body)
+    for ob in results['hits']['hits']:
+      try:
+        mt = TextWithMetadata(ob)
+        presentielijsten[mt.id] = mt
+      except AttributeError:
+        print(ob)
+    return presentielijsten
+
+
+def get_nihil_actum(es=es_republic, index='republic_paragraphs'):
+  na_body = {"query": {
+    "bool": {
+      "must": [
+        {
+          "match": {
+            "metadata.keyword_matches.match_category": "non_meeting_date"
+          }
+        }
+      ],
+
+    }
+  },
+    "size": 5000,
+    "sort": ["metadata.meeting_date"],
+  }
+
+  na_results = es.search(index=index, body=na_body)
+  nihil_actum = {}
+  for ob in na_results["hits"]["hits"]:
+    if ob['_source']['metadata']['paragraph_id']:
+      mt = TextWithMetadata(ob)
+      nihil_actum[mt.para_id] = mt
+  return nihil_actum
+
+
+# for n in nihil_actum.keys():
+#     nad = nihil_actum[n]
+#     print(nad.get_meeting_date(), ": ", n)
+
 
 def simple_search(es, input):
     body = {
@@ -32,7 +88,7 @@ def simple_search(es, input):
 
 
 def search_resolutions_query(text):
-  "search the resolutions, not the presentielijsten (as far as they are marked as such"
+    """search the resolutions, not the presentielijsten (as far as they are marked as such"""
     body = {
       "query": {
         "bool": {
@@ -60,24 +116,7 @@ def search_resolutions_query(text):
     }
 
     return body
-
-
-def get_presentielijsten(es):
-    "this is now for the whole index, adjust for a year"
-    body = {
-      "query": {
-        "term": {
-          "metadata.categories": "participant_list"
-        }
-      },
-      "size": 5000,
-      "sort": ["metadata.meeting_date"],
-
-    }
-
-    results: list = es.search(index="paragraph_index", body=body)
-
-    return results
+    #return results
     
 
 
@@ -116,6 +155,20 @@ def get_name_from_namenindex(proposed):
     candidate = Counter(names).most_common(3)
 
   return candidate
+
+
+def bulk_upload(bulkdata=[], index='attendancelist', doctype='attendancelist'):
+  index = index
+  indextype = doctype
+  bulk_data = []
+  for item in bulkdata:
+    try:
+      bulk_data.append({'index': {'_type': indextype,
+                                  '_index': index,
+                                  '_id': '%s' % item.get('id')}})
+      bulk_data.append(item)
+    except KeyError:
+      print(item)
 
 
 def get_name_for_disambiguation(proposed, base_config, debug=False):
@@ -182,3 +235,6 @@ def get_name_for_disambiguation(proposed, base_config, debug=False):
   if debug == True:
     print(body)
   return candidate  # ([names, people])
+
+
+

@@ -1,6 +1,7 @@
 from republic.fuzzy.fuzzy_keyword_searcher import FuzzyKeywordSearcher
 from republic.config import republic_config
 
+
 base_config = republic_config.base_config
 naaminput = ['Van Maasdam', 'Cammingha', 'Haersolte', 'Iddekinge', 'Isselmuden', 'van Welderen',
              'Ockersse', 'Heukelum', 'Rose', 'Rouse', 'van Singendonck', 'Zanders', 'Bentinck',
